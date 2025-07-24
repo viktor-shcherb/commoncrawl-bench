@@ -99,7 +99,21 @@ func main() {
 				_ = out.Body.Close()
 			}
 			dur = time.Since(start)
-			resCh <- result{url: u, bytes: n, duration: dur, err: rerr}
+
+			r := result{url: u, bytes: n, duration: dur, err: rerr}
+
+			// **PRINT IMMEDIATELY****
+			if r.err != nil {
+				fmt.Printf("  %s → ERROR: %v\n", r.url, r.err)
+			} else {
+				mb := float64(r.bytes) / (1024 * 1024)
+				sp := mb / r.duration.Seconds()
+				fmt.Printf("  %s → %.2f MB in %.2fs (%.2f MB/s)\n",
+					r.url, mb, r.duration.Seconds(), sp)
+			}
+
+			// still send to channel for your summary
+			resCh <- r
 		}(u)
 	}
 

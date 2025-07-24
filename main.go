@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"strings"
 	"sync"
@@ -17,8 +18,10 @@ import (
 )
 
 const (
-	maxRetries    = 3
-	retryInterval = time.Second
+	maxRetries      = 3
+	retryInterval   = time.Second
+	rollOutMaxDelay = 5 * time.Second
+	jitterMax       = 500 * time.Millisecond
 )
 
 type result struct {
@@ -29,6 +32,8 @@ type result struct {
 }
 
 func main() {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
 	listPath := flag.String("list", "warcs.txt", "Path to file containing one S3 URI or CommonCrawl URL per line")
 	concurrency := flag.Int("c", 1, "Number of parallel downloads")
 	region := flag.String("region", "us-east-1", "AWS region for CommonCrawl bucket")
@@ -60,6 +65,9 @@ func main() {
 		wg.Add(1)
 		go func(u string) {
 			defer wg.Done()
+			// ← gentle roll‑out: stagger start times
+			time.Sleep(time.Duration(r.Intn(int(rollOutMaxDelay))))
+
 			sem <- struct{}{}        // acquire
 			defer func() { <-sem }() // release
 
@@ -87,7 +95,9 @@ func main() {
 				rerr = req.Send()
 				if rerr != nil {
 					if rf, ok := rerr.(awserr.RequestFailure); ok && rf.StatusCode() == 503 {
-						time.Sleep(retryInterval)
+						// ← exponential back‑off + random jitter
+						delay := retryInterval*time.Duration(attempt) + time.Duration(r.Intn(int(jitterMax)))
+						time.Sleep(delay)
 						continue
 					}
 				}
